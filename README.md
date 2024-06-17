@@ -1,3 +1,11 @@
+# LABMaiTE'f fork of Rlemasklib from isarandi
+This repository contains a fork from the original library designed to work for Windows. The setup.py has the following line removed:
+```
+  extra_compile_args=['-Wno-cpp', '-Wno-unused-function', '-std=c99'],
+```
+
+
+Original content of README.md:
 # Run-Length Encoded Mask Operations
 
 This library is an extended and improved version of the [COCO API](https://github.com/cocodataset/cocoapi)'s `pycocotools.mask` module (which was originally written by Piotr Dollár and Tsung-Yi Lin).
