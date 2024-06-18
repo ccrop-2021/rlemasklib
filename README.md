@@ -1,9 +1,13 @@
-# LABMaiTE'f fork of Rlemasklib from isarandi
+# LABMaiTE's fork of isarandi's Rlemasklib library
 This repository contains a fork from the original library designed to work for Windows. The setup.py has the following line removed:
 ```
   extra_compile_args=['-Wno-cpp', '-Wno-unused-function', '-std=c99'],
 ```
 
+Then, install the library with the command:
+```
+  pip install -e .
+```
 
 Original content of README.md:
 # Run-Length Encoded Mask Operations

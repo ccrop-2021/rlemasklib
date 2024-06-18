@@ -8,7 +8,7 @@ ext_modules = [
         'rlemasklib.rlemasklib_cython',
         sources=['rlemasklib/rlemasklib_cython.pyx'],
         include_dirs=[np.get_include(), 'rlemasklib'],
-        extra_compile_args=['-Wno-cpp', '-Wno-unused-function', '-std=c99'],
+        # extra_compile_args=['-Wno-cpp', '-Wno-unused-function', '-std=c99'],
     )
 ]
 
