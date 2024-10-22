@@ -54,70 +54,158 @@ class BoolFunc(Enum):
 
 
 class RLE:
-    def __init__(self, d):
-        self.d = d
-
-    def __getitem__(self, key):
-        # Cropping via indexing like rle[1:2, 3:4]
-        if isinstance(key, tuple) and len(key) == 2:
-            # both indices must be a slice
-            if isinstance(key[0], slice) and isinstance(key[1], slice):
-                # substitute negative indices and None:
-                h, w = self.d['size']
-                start_h, stop_h, step_h = key[0].indices(h)
-                start_w, stop_w, step_w = key[1].indices(w)
-                # step must be 1
-                if step_h != 1 or step_w != 1:
-                    raise ValueError('Only step=1 is supported')
-                # crop the mask
-                return crop(self.d, [start_w, start_h, stop_w - start_w, stop_h - start_h])
+    def __init__(self, masks=None, encoded_mask=None):
+        if encoded_mask is not None:
+            if isinstance(encoded_mask, (tuple, list)):
+                self.rles = encoded_mask
             else:
-                raise ValueError('Only slicing is supported, not individual indexing')
+                self.rles = [encoded_mask]
+        elif masks is not None:
+            if masks.ndim == 3:
+                # masks is (BXHXW) but decode expects (HXWXB)                
+                masks = np.moveaxis(masks, 0, -1)
+                self.rles = encode(masks)                
+            elif masks.ndim == 2:
+                self.rles = [encode(masks)]
+            else:
+                raise ValueError("Invalid mask dimensions. Must be (BXHXW) or (HXW).")
         else:
-            raise ValueError('Only 2D slicing is supported')
+            raise ValueError("Either masks or encoded_mask must be provided.")
 
-    def __setitem__(self, key, value):
-        if value not in (0, 1):
-            raise ValueError('Value must be 0 or 1')
-
-        if isinstance(key, tuple) and len(key) == 2:
-            # both indices must be a slice
-            if isinstance(key[0], slice) and isinstance(key[1], slice):
-                # substitute negative indices and None:
-                h, w = self.d['size']
-                start_h, stop_h, step_h = key[0].indices(h)
-                start_w, stop_w, step_w = key[1].indices(w)
-                # step must be 1
-                if step_h != 1 or step_w != 1:
-                    raise ValueError('Only step=1 is supported')
-
-                boxmask = from_bbox([start_w, start_h, stop_w - start_w, stop_h - start_h], [h, w])
-                if value == 0:
-                    self.d = difference(self.d, boxmask)
-                else:
-                    self.d = union([self.d, boxmask])
+    def __getitem__(self, index):
+        if isinstance(index, np.ndarray):
+            if index.dtype == bool:
+                # Boolean indexing
+                selected_rles = [self.rles[i] for i, flag in enumerate(index) if flag]
+                return RLE(encoded_mask=selected_rles)
+            elif index.dtype == int:
+                # Index array
+                selected_rles = [self.rles[i] for i in index]
+                return RLE(encoded_mask=selected_rles)
             else:
-                raise ValueError('Only slicing is supported, not individual indexing')
+                raise ValueError("Unsupported indexing type.")
+        else:
+            # Slicing with slice object
+            return RLE(encoded_mask=self.rles[index])        
 
-    # overload the bitwise operators
+    def __len__(self):
+        return len(self.rles)
+
+    def __repr__(self):
+        if len(self.rles) == 1:
+            return str(self.rles[0])
+        return str(self.rles)
+
     def __and__(self, other):
-        return RLE(intersection([self.d, other.d]))
+        return RLE(encoded_mask=[intersection([self.rles[i], other.rles[i]]) for i in range(len(self))])
 
     def __or__(self, other):
-        return RLE(union([self.d, other.d]))
+        return RLE(encoded_mask=[union([self.rles[i], other.rles[i]]) for i in range(len(self))])
 
     def __xor__(self, other):
-        return RLE(symmetric_difference(self.d, other.d))
+        return RLE(encoded_mask=[symmetric_difference(self.rles[i], other.rles[i]) for i in range(len(self))])
 
     def __sub__(self, other):
-        return RLE(difference(self.d, other.d))
+        return RLE(encoded_mask=[difference(self.rles[i], other.rles[i]) for i in range(len(self))])
 
     def __invert__(self):
-        return RLE(complement(self.d))
+        return RLE(encoded_mask=[complement(self.rles[i]) for i in range(len(self))])
 
     def todict(self):
-        return self.d
+        return self.rles if len(self.rles) > 1 else self.rles[0]
 
+    @property
+    def area(self):
+        return area(self.rles)
+
+    def complement(self):
+        return RLE(encoded_mask=complement(self.rles))
+
+    def decode(self):
+        masks = decode(self.rles)
+        masks = np.moveaxis(masks, -1, 0).astype(bool)
+        return masks
+
+    @property
+    def masks(self):
+        return self.decode()
+
+    def crop(self, bbox):
+        return RLE(encoded_mask=crop(self.rles, bbox))
+
+    def pad(self, paddings, value=0):
+        return RLE(encoded_mask=pad(self.rles, paddings, value))
+
+    @property
+    def xywh(self):
+        return to_bbox(self.rles)
+    @property
+    def xyxy(self):
+        xywh = np.array(to_bbox(self.rles))  # Assuming to_bbox returns a numpy array already
+        # Efficiently compute xyxy in a vectorized way
+        xyxy = np.hstack((xywh[:, :2], xywh[:, :2] + xywh[:, 2:4]))
+        return xyxy
+    
+
+    def from_bbox(self, bbox, imshape=None, imsize=None):
+        return RLE(encoded_mask=[from_bbox(bbox, imshape, imsize)])
+
+    def from_polygon(self, poly, imshape=None, imsize=None):
+        return RLE(encoded_mask=[from_polygon(poly, imshape, imsize)])
+
+    def union(self, other):
+        return RLE(encoded_mask=[union([self.rles[i], other.rles[i]]) for i in range(len(self))])
+
+    def intersection(self, other):
+        return RLE(encoded_mask=[intersection([self.rles[i], other.rles[i]]) for i in range(len(self))])
+
+    def difference(self, other):
+        return RLE(encoded_mask=[difference(self.rles[i], other.rles[i]) for i in range(len(self))])
+
+    def symmetric_difference(self, other):
+        return RLE(encoded_mask=[symmetric_difference(self.rles[i], other.rles[i]) for i in range(len(self))])
+
+    def merge(self, other, boolfunc: BoolFunc):
+        return RLE(encoded_mask=[merge([self.rles[i], other.rles[i]], boolfunc) for i in range(len(self))])
+
+    def iou(self):
+        # return iou matrix size BXB
+        ioum = np.zeros((len(self), len(self)))
+        for i in range(len(self)):
+            for j in range(len(self)):
+                ioum[i, j] = iou([self.rles[i],self.rles[j]])
+        return ioum
+
+    def connected_components(self, connectivity=4, min_size=1):        
+        return [RLE(encoded_mask=connected_components(rle, connectivity, min_size)) for rle in self.rles]
+
+    def shift(self, offset, border_value=0):
+        return RLE(encoded_mask=[shift(rle, offset, border_value) for rle in self.rles])
+
+    def erode(self, connectivity=4):
+        return RLE(encoded_mask=[erode(rle, connectivity) for rle in self.rles])
+
+    def dilate(self, connectivity=4):
+        return RLE(encoded_mask=[dilate(rle, connectivity) for rle in self.rles])
+
+    def opening(self, connectivity=4):
+        return RLE(encoded_mask=[opening(rle, connectivity) for rle in self.rles])
+
+    def closing(self, connectivity=4):
+        return RLE(encoded_mask=[closing(rle, connectivity) for rle in self.rles])
+
+    def remove_small_components(self, connectivity=4, min_size=1):
+        return RLE(encoded_mask=[remove_small_components(rle, connectivity, min_size) for rle in self.rles])
+
+    def fill_small_holes(self, connectivity=4, min_size=1):
+        return RLE(encoded_mask=[fill_small_holes(rle, connectivity, min_size) for rle in self.rles])
+
+    def largest_connected_component(self, connectivity=4):
+        return RLE(encoded_mask=[largest_connected_component(rle, connectivity) for rle in self.rles])
+
+    @property
+    def centroid(self):
+        return centroid(self.rles)
 
 def area(rleObjs):
     """Compute the foreground area for a mask or multiple masks.
